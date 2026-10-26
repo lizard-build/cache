@@ -2,7 +2,6 @@
 import fs from "fs";
 import path from "path";
 import * as core from "@actions/core";
-import * as cache from "@actions/cache";
 import * as store from "./store.js";
 
 async function run() {
@@ -14,7 +13,7 @@ async function run() {
   }
   if (core.getBooleanInput("lookup-only")) return;
   const paths = JSON.parse(core.getState("paths") || "[]");
-  if (core.getState("mode") === "lizard") {
+  if (core.getState("mode") === "lizard" && store.savesLocally()) {
     const [ref] = store.scopes();
     if (!ref) return;
     const base = store.entryBase(ref, store.version(paths), key);
@@ -33,6 +32,9 @@ async function run() {
     return;
   }
   try {
+    // Not kept on the runner's disk (a branch, tag or pull request job, or not a Lizard runner):
+    // GitHub's cache, scoped by ref on GitHub's side.
+    const cache = await import("@actions/cache");
     const id = await cache.saveCache(paths, key, { uploadChunkSize: Number(core.getInput("upload-chunk-size")) || undefined }, core.getBooleanInput("enableCrossOsArchive"));
     if (id !== -1) core.info(`Cache saved with key: ${key}`);
   } catch (e) {

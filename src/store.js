@@ -1,10 +1,12 @@
 // lizard-build/cache: actions/cache with its entries on the Lizard runner's repository cache disk.
 //
 // On a Lizard runner whose cache disk lasts (LIZARD_CACHE_PERSISTENT=true, set by the runner VM):
-// entries are tar+zstd files under $LIZARD_CACHE_DIR/actions-cache, scoped like GitHub's cache --
-// a run sees entries of its own ref and of the default branch, and saves into its own ref; an
-// existing key is never overwritten. Everywhere else (other runners, Lizard VMs that may get a
-// fork's job) it is GitHub's cache service through @actions/cache, exactly like actions/cache.
+// entries are tar+zstd files under $LIZARD_CACHE_DIR/actions-cache. Any job restores from there
+// (its own ref, then the default branch, like GitHub's cache). Only a job whose writes the VM keeps
+// -- a default-branch push, schedule or dispatch, decided before the job's code ran
+// (/run/lizard/promote) -- saves there; every other job saves to GitHub's cache, which scopes it
+// by ref on GitHub's side. Everywhere else (other runners, Lizard VMs that may get a fork's job)
+// it is GitHub's cache service through @actions/cache, exactly like actions/cache.
 
 import fs from "fs";
 import os from "os";
@@ -16,6 +18,11 @@ import * as glob from "@actions/glob";
 
 const ROOT = () => path.join(process.env.LIZARD_CACHE_DIR, "actions-cache");
 const MAX_TOTAL_BYTES = 10 * 1024 ** 3;
+
+/** Will what this job writes to the runner's disk be kept? (lizard-job-started's decision) */
+function savesLocally() {
+  try { return fs.readFileSync("/run/lizard/promote", "utf8").trim() === "promote"; } catch { return false; }
+}
 
 function onLizard() {
   return process.env.LIZARD_CACHE_PERSISTENT === "true" && !!process.env.LIZARD_CACHE_DIR
@@ -107,7 +114,7 @@ async function compress(paths, base) {
   const list = `${tmp}.list`;
   fs.writeFileSync(list, files.join("\n") + "\n");
   try {
-    sh('tar -cf - -P -C "$1" --files-from "$2" | zstd -T0 -3 --quiet -o "$3"', [workspace(), list, `${tmp}.tar.zst`]);
+    sh('tar -cf - -P -C "$1" --files-from "$2" | zstd -T0 -1 --quiet -o "$3"', [workspace(), list, `${tmp}.tar.zst`]);
   } finally { fs.rmSync(list, { force: true }); }
   return tmp;
 }
@@ -132,4 +139,4 @@ function prune() {
   }
 }
 
-export { onLizard, readInputs, version, scopes, entryBase, find, extract, compress, prune };
+export { savesLocally, onLizard, readInputs, version, scopes, entryBase, find, extract, compress, prune };
